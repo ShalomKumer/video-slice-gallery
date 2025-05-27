@@ -1,4 +1,3 @@
-
 import { useState, useRef } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
@@ -47,7 +46,7 @@ const VideoUpload = ({ onUploadComplete, onClipsGenerated }: VideoUploadProps) =
     }
   };
 
-  const handleFileSelect = (file: File) => {
+  const handleFileSelect = async (file: File) => {
     if (file.size > 4 * 1024 * 1024 * 1024) { // 4GB limit
       toast({
         title: "File too large",
@@ -58,49 +57,59 @@ const VideoUpload = ({ onUploadComplete, onClipsGenerated }: VideoUploadProps) =
     }
 
     setUploadedFile(file);
-    simulateUpload(file);
+    await uploadVideo(file);
   };
 
-  const simulateUpload = (file: File) => {
-    setUploadProgress(0);
-    const interval = setInterval(() => {
-      setUploadProgress(prev => {
-        if (prev >= 100) {
-          clearInterval(interval);
-          simulateProcessing();
-          return 100;
-        }
-        return prev + 10;
+  const uploadVideo = async (file: File) => {
+    const formData = new FormData();
+    formData.append('video', file);
+
+    try {
+      setUploadProgress(0);
+      setIsProcessing(true);
+
+      const response = await new Promise((resolve, reject) => {
+        const xhr = new XMLHttpRequest();
+        
+        xhr.upload.onprogress = (event) => {
+          if (event.lengthComputable) {
+            const progress = (event.loaded / event.total) * 100;
+            setUploadProgress(Math.round(progress));
+          }
+        };
+
+        xhr.onload = () => {
+          if (xhr.status >= 200 && xhr.status < 300) {
+            resolve(JSON.parse(xhr.responseText));
+          } else {
+            reject(new Error('Upload failed'));
+          }
+        };
+
+        xhr.onerror = () => reject(new Error('Upload failed'));
+
+        xhr.open('POST', 'http://localhost:3001/api/upload');
+        xhr.send(formData);
       });
-    }, 200);
-  };
 
-  const simulateProcessing = () => {
-    setIsProcessing(true);
-    toast({
-      title: "Upload complete!",
-      description: "Processing video into 90-second clips..."
-    });
-
-    // Simulate processing time
-    setTimeout(() => {
-      const mockClips = Array.from({ length: 6 }, (_, i) => ({
-        id: i + 1,
-        title: `Clip ${i + 1}`,
-        duration: 90,
-        thumbnail: `https://picsum.photos/320/180?random=${i}`,
-        videoUrl: `#clip-${i + 1}`,
-        createdAt: new Date().toISOString()
-      }));
-
-      onClipsGenerated(mockClips);
-      setIsProcessing(false);
+      const data = response as { clips: any[] };
       
       toast({
-        title: "Processing complete!",
-        description: `Generated ${mockClips.length} clips ready for download`
+        title: "Upload complete!",
+        description: `Generated ${data.clips.length} clips successfully`
       });
-    }, 3000);
+
+      onClipsGenerated(data.clips);
+      setIsProcessing(false);
+    } catch (error) {
+      console.error('Upload error:', error);
+      toast({
+        title: "Upload failed",
+        description: "There was an error uploading your video",
+        variant: "destructive"
+      });
+      setIsProcessing(false);
+    }
   };
 
   return (
@@ -161,7 +170,7 @@ const VideoUpload = ({ onUploadComplete, onClipsGenerated }: VideoUploadProps) =
                 </div>
               )}
 
-              {isProcessing && (
+              {isProcessing && uploadProgress === 100 && (
                 <div className="space-y-2">
                   <p className="text-center">Processing video into clips...</p>
                   <div className="animate-pulse bg-purple-500/30 h-2 rounded"></div>
